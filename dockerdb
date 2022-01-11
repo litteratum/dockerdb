@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """ Script for simplified running of databases inside Docker containers """
-from abc import ABC, abstractmethod
 import argparse
 import subprocess
 import sys
+from abc import ABC, abstractmethod
 from uuid import uuid4
 
 
 def ensure_container_name(args):
-    """ Container name should be unique. If it is not, create some random name
-    and update args """
+    """Container name should be unique. If it is not, create some random name
+    and update args"""
     try:
         running_containers = [
-            name.strip('"') for name in subprocess.run(
-                'docker ps --format "{{.Names}}"'.split(), check=True,
-                stdout=subprocess.PIPE, text=True
-            ).stdout.strip().split('\n')
+            name.strip('"')
+            for name in subprocess.run(
+                'docker ps --format "{{.Names}}"'.split(),
+                check=True,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            .stdout.strip()
+            .split("\n")
         ]
     except Exception as exc:
-        print('Failed to get the list of running containers: %s' % exc)
+        print("Failed to get the list of running containers: %s" % exc)
 
     if args.name in running_containers:
         print('Container with name "%s" already exists' % args.name)
@@ -28,20 +33,19 @@ def ensure_container_name(args):
 
 
 def get_cli_args():
-    """ Parse CLI args """
+    """Parse CLI args"""
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(
-        dest='command',
-        title='commands',
+        dest="command",
+        title="commands",
         help=(
-            'Start DB inside a Docker container. See Docker `run` command '
-            'documentation to get list of all supported arguments. '
+            "Start DB inside a Docker container. See Docker `run` command "
+            "documentation to get list of all supported arguments. "
             'Note: "--rm" and "-it" arguments are appended by default'
-        )
+        ),
     )
 
     add_pg_parser(subparsers)
-    add_sybase_parser(subparsers)
 
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -51,42 +55,27 @@ def get_cli_args():
 
 
 def add_pg_parser(subparsers):
-    """ Add Postres parser """
+    """Add Postres parser"""
     pg_run_command = subparsers.add_parser(
-        'pg', help='Command to start Postgres container',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        "pg",
+        help="Command to start Postgres container",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    pg_run_command.add_argument("-n", "--name", default="pg_db", help="Container name")
+    pg_run_command.add_argument(
+        "-i", "--image", default="postgres:alpine", help="Base image for container"
+    )
+    pg_run_command.add_argument("-u", "--user", default="tdb", help="Postgres DB user")
+    pg_run_command.add_argument(
+        "-s", "--password", default="tdb", help="Postgres password"
     )
     pg_run_command.add_argument(
-        '-n', '--name', default='pg_db', help='Container name'
-    )
-    pg_run_command.add_argument(
-        '-i', '--image', default='postgres:alpine',
-        help='Base image for container'
-    )
-    pg_run_command.add_argument(
-        '-u', '--user', default='asw', help='Postgres DB user'
-    )
-    pg_run_command.add_argument(
-        '-s', '--password', default='asw', help='Postgres password'
-    )
-    pg_run_command.add_argument(
-        '-b', '--dbname', default='aswdb', help='Postgres DB name'
-    )
-
-
-def add_sybase_parser(subparsers):
-    """ Add Sybase parser """
-    pg_run_command = subparsers.add_parser(
-        'sybase', help='Command to start Sybase container',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    pg_run_command.add_argument(
-        '-n', '--name', default='sybase_db', help='Container name'
+        "-b", "--dbname", default="tdb", help="Postgres DB name"
     )
 
 
 class Command(ABC):
-    """ Abstract command """
+    """Abstract command."""
 
     def __init__(self, args, extra_args):
         self.args = args
@@ -96,58 +85,46 @@ class Command(ABC):
 
     @abstractmethod
     def _prepare_command(self) -> str:
-        """ Prepare command to be run with `execute` method. It should be
-        string of arguments separated by space """
+        """Prepare command to be run with `execute` method.
+
+        It should be a string of arguments separated by space.
+        """
 
     def execute(self) -> None:
-        """ Execute command """
+        """Execute command"""
         subprocess.run(self.command.split(), check=False)
 
 
 class PGExec(Command):
-    """ Command to start PG container """
+    """Command to start PG container."""
 
     def _prepare_command(self):
         command = (
-            'docker run -it --rm --name {container_name} '
-            '-e POSTGRES_USER={pg_user} '
-            '-e POSTGRES_PASSWORD={pg_password} '
-            '-e POSTGRES_DB={pg_db} '
+            "docker run -it --rm --name {container_name} "
+            "-e POSTGRES_USER={pg_user} "
+            "-e POSTGRES_PASSWORD={pg_password} "
+            "-e POSTGRES_DB={pg_db} "
         )
 
-        command += ' '.join(self.extra_args) + ' '
-        command += f'{self.args.image} '
+        command += " ".join(self.extra_args) + " "
+        command += f"{self.args.image} "
 
         command = command.format(
             container_name=self.args.name,
             pg_user=self.args.user,
             pg_password=self.args.password,
-            pg_db=self.args.dbname
+            pg_db=self.args.dbname,
         )
         return command
 
 
-class SybaseExec(Command):
-    """ Command to start Sybase container """
+def main():
+    """Main entry point."""
+    args, extra = get_cli_args()
+    ensure_container_name(args)
 
-    def _prepare_command(self):
-        command = (
-            'docker run -it --rm --name {container_name} '
-        )
-
-        command += ' '.join(self.extra_args) + ' '
-        command += 'asw/debian:10-sybase ./start_sybase'
-        command = command.format(container_name=self.args.name)
-        return command
+    PGExec(args, extra).execute()
 
 
 if __name__ == "__main__":
-    ARGS, EXTRA = get_cli_args()
-    ensure_container_name(ARGS)
-
-    if ARGS.command == 'pg':
-        COMMAND = PGExec(ARGS, EXTRA)
-    elif ARGS.command == 'sybase':
-        COMMAND = SybaseExec(ARGS, EXTRA)
-
-    COMMAND.execute()
+    main()
